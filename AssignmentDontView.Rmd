@@ -1,0 +1,99 @@
+---
+title: "Predicting correct and in-correct weight lifting techniques using accelerometer data"
+author: "A Laing"
+date: "23 January 2016"
+output: html_document
+---
+
+## Aim
+Six young health participants were asked to perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in five different fashions: exactly according to the specification (Class A), throwing the elbows to the front (Class B), lifting the dumbbell only halfway (Class C), lowering the dumbbell only halfway (Class D) and throwing the hips to the front (Class E).
+
+Can we predict the Class from sensor data on the body and dumbell of the participants?
+
+## Import Data
+
+First we import the training and testing set of the data. Also we load relevant R libraries.
+
+```{r ImportDataset, cache=TRUE,warning=FALSE}
+library(ggplot2)
+library(caret)
+training <- read.csv("pml-training.csv", stringsAsFactors = FALSE,na.strings=c("NA",""))
+testing <- read.csv("pml-testing.csv", stringsAsFactors = FALSE,na.strings=c("NA",""))
+#remove 1st column (index)
+training[1] <- NULL
+testing[1] <- NULL
+#convert user_name to a factor
+training$user_name <- as.factor(training$user_name)
+testing$user_name <- as.factor(testing$user_name)
+#convert classe to a factor
+training$classe <- as.factor(training$classe)
+#there seem to be a lot of character vectors - change these to numerical
+#First, find out what variables are character
+lIs.character <- which(sapply(training,class)=="character")
+#now change each of these to type numeric
+training[,lIs.character] <- apply(training[,lIs.character],2,function(x) as.numeric(x))
+testing[,lIs.character] <- apply(testing[,lIs.character],2,function(x) as.numeric(x))
+```
+
+## Variable selection / exploratory analysis
+We need to choose the correct variables for the model. The timestamp#1 seem to correspond to particular participants, #2 is a recording window for acceleration data. 
+
+The num_window should be removed as this predicts the type of classe really well and must be some artifact from the experimental recording.
+
+
+```{r timeStamp, fig.width=6,fig.height=4}
+require(ggplot2)
+qplot(x=raw_timestamp_part_1,y=raw_timestamp_part_2,colour=user_name,data=training,main="Timestamps do not contain useful data")
+
+qplot(x=num_window,y=classe,data=training,main="Num_window predicts class",
+      xlim=c(0,200))
+```
+
+This plot suggests we can ignore the timestamp variables.
+
+As our model should be person independent, we should also therefore remove the user_name  variable from the model and the num_window variable.
+
+We will also find out that there are a number of variables that are NA, these will be removed too.
+
+
+```{r removeTerms,cache=TRUE}
+#We remove all time and person and experimental-recording data (such as when a measurement was carried out)
+library(stringr)
+library(reshape2)
+
+training <- training[-c(1:6)] # remove user and timestamp info
+testing <- testing[-c(1:6)]
+
+#Find number of NAs in each column
+isNA <- apply(training,2,function(x) sum(is.na(x)))
+#only keep variables with 0 NAs
+training <- training[,which(isNA==0)]
+#to the same with the testing set, but avoid the "class"
+keep <- names(training)
+keep <- keep[-53] # remove "classe"
+testing <- testing[,c(keep,"problem_id")] #alter the testing set accordingly
+```
+
+## Cross Validation
+With cross validation there is no need to create a separate test and training set, as this happens automatically within the k-fold process. It is considered a more accurate way of getting an out-of-sample error than the "hold one out" method of completely separating the data. 
+
+## Model selection
+This is a classification problem and a decision tree machine learning algorithm would be a sensible choice. The authors of the paper that supplied the data used random forest, assessed with 10-fold cross-validation. As the data is large and we will be testing our model anyway, 3-fold cross-validation will be adequate to get an estimate of our model accuracy.
+
+```{r buildModel,cache=TRUE}
+control <- trainControl(method="cv",number=3,allowParallel=TRUE)
+model <- train(classe ~ .,method="rf",data=training, trControl=control)
+model
+model$finalModel
+```
+
+## Model Assessment
+
+You can see the accuracy of the final model is 99%, with an out of sample error estimate of 0.4%.
+
+
+## Predicting for the quiz
+```{r}
+predict(model,testing) 
+```
+
